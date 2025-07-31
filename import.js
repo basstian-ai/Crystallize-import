@@ -1,63 +1,88 @@
-/* ─── imports ─────────────────────────────────────────────────────────── */
-import utils from '@crystallize/import-utilities';          // CJS → default export
+/* ───────── imports ──────────────────────────────────────────────────── */
+import utils from '@crystallize/import-utilities';          // CommonJS → default
 const { Bootstrapper } = utils;
 
-/* ─── auth & tenant ───────────────────────────────────────────────────── */
+/* ───────── tenant auth ──────────────────────────────────────────────── */
 const tenantIdentifier = 'starter-kit';                     // your slug
-const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;       // repo secret
-const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;   // repo secret
+const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
+const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* ─── tiny helper to make URL-safe paths ──────────────────────────────── */
+/* ───────── util: make URL-safe slugs ────────────────────────────────── */
 const slug = (s) =>
   s.toLowerCase()
+   .trim()
    .replace(/[^a-z0-9]+/g, '-')   // spaces & punctuation → dash
-   .replace(/(^-|-$)/g, '');      // trim leading / trailing dash
+   .replace(/(^-|-$)/g, '');      // cut leading/trailing dashes
 
-/* ─── fetch 100 dummyjson products ────────────────────────────────────── */
+/* ───────── fetch the 100 dummy products again ──────────────────────── */
 const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* ─── build the spec: ONLY items, shape already exists ────────────────── */
+/* ───────── derive unique category list ─────────────────────────────── */
+const categories = [...new Set(products.map(p => p.category))];
+
+/* ───────── build the spec ──────────────────────────────────────────── */
 const spec = {
-  items: products.map((p) => ({
-    name: p.title,
-    shape: 'beta-storefront',
-    vatType: 'No Tax',
+  /* 1️⃣ category folders (shape = "category") */
+  items: [
+    ...categories.map((c) => ({
+      name: c,
+      shape: 'category',                         // existing folder shape
+      tree: { path: `/products/${slug(c)}` },    // /products/category-slug
+      vatType: 'No Tax',
+      published: true,                           // publish the folder
+      externalReference: `cat-${slug(c)}`,       // idempotency key
+    })),
 
-    /* put it in /products/<slug> */
-    tree: { path: `/products/${slug(p.title)}` },
+    /* 2️⃣ products, now placed in their category folder */
+    ...products.map((p) => {
+      const catSlug   = slug(p.category);
+      const productSlug = slug(p.title);
 
-    /* shape components */
-    components: {
-      title:        p.title,
-      description:  { json: [
-        { kind: 'block', type: 'paragraph', textContent: p.description }
-      ]},
-      brand:        p.brand,
-      thumbnail:    [{ src: p.thumbnail }],
-    },
+      return {
+        name: p.title,
+        shape: 'beta-storefront',                // your existing product shape
+        tree: { path: `/products/${catSlug}/${productSlug}` },
+        vatType: 'No Tax',
+        published: true,                         // publish product
 
-    /* one variant that satisfies the variant-components of the shape */
-    variants: [{
-      name:       p.title,
-      sku:        `dummy-${p.id}`,
-      isDefault:  true,
-      price:      { default: p.price },   // “default” price-variant = NOK
-      stock:      p.stock,
-      images:     p.images.map((src) => ({ src })),
-      attributes: {},                     // empty → still fulfils the field
-    }],
-  })),
+        /* idempotency key lets Bootstrapper update instead of duplicating */
+        externalReference: `dummyjson-${p.id}`,
+
+        components: {
+          title:       p.title,
+          description: { json: [
+            { kind: 'block', type: 'paragraph', textContent: p.description }
+          ]},
+          brand:       p.brand,
+          thumbnail:   [{ src: p.thumbnail }],
+        },
+
+        variants: [{
+          name:      p.title,
+          sku:       `dummy-${p.id}`,
+          isDefault: true,
+          price:     { default: p.price },       // single NOK price-variant
+          stock:     p.stock,
+          images:    p.images.map((src) => ({ src })),
+          attributes: {},
+        }],
+      };
+    }),
+  ],
 };
 
-/* ─── bootstrap the tenant ────────────────────────────────────────────── */
+/* ───────── run the bootstrapper ─────────────────────────────────────── */
 const bootstrapper = new Bootstrapper();
 bootstrapper.setAccessToken(tokenId, tokenSecret);
 bootstrapper.setTenantIdentifier(tenantIdentifier);
 bootstrapper.setSpec(spec);
 
-await bootstrapper.start();   // runs all mutations
-await bootstrapper.kill();    // close handles
+/* forceUpdate=true → existing items are updated, moved & published       */
+bootstrapper.setOptions({ forceUpdate: true });
 
-console.log(`✅ Imported ${products.length} products into /products`);
+await bootstrapper.start();
+await bootstrapper.kill();
+
+console.log(`✅ Created ${categories.length} category folders and placed ${products.length} products inside them (all published).`);
