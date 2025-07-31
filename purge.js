@@ -1,48 +1,46 @@
-/*********************************************************************
- * delete everything *inside* /products but keep the /products folder
- *********************************************************************/
-
+// purge.js — delete every product and folder under /products
 const TOKEN_ID     = process.env.CRYSTALLIZE_TOKEN_ID;
 const TOKEN_SECRET = process.env.CRYSTALLIZE_TOKEN_SECRET;
 const LANG         = 'en';
 
-/* tiny fetch wrapper */
-async function pim(query, variables = {}) {
+const pim = async (q, v={}) => {
   const r = await fetch('https://pim.crystallize.com/graphql', {
     method : 'POST',
     headers: {
       'Content-Type'                      : 'application/json',
       'X-Crystallize-Access-Token-Id'     : TOKEN_ID,
-      'X-Crystallize-Access-Token-Secret' : TOKEN_SECRET,
+      'X-Crystallize-Access-Token-Secret' : TOKEN_SECRET
     },
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query:q, variables:v })
   });
   const { data, errors } = await r.json();
   if (errors) throw new Error(JSON.stringify(errors, null, 2));
   return data;
-}
+};
 
-/* 1️⃣  ask for all direct children of /products */
-const GET_CHILDREN = `
-  query ($path:String!, $lang:String!){
-    tree {
-      get(path:$path, language:$lang){
-        children { id name shapeIdentifier }
-      }
+// 1) search every child of /products (depth 1)
+const SEARCH = `
+  query ($path:String!,$lang:String!){
+    itemSearch(
+      filter:{ parent:{ eq:$path } },
+      language:$lang,
+      first:250
+    ){
+      edges{ node{ id path } }
     }
   }`;
 
-const { tree:{ get:{ children } } } =
-  await pim(GET_CHILDREN, { path:'/products', lang:LANG });
+const { itemSearch:{ edges } } =
+  await pim(SEARCH, { path:'/products', lang:LANG });
 
-if (!children.length) { console.log('Nothing to delete.'); process.exit(0); }
+if (!edges.length) { console.log('Nothing to delete.'); process.exit(0); }
 
-/* 2️⃣  delete them one by one */
-const DEL = `mutation($id:ID!){ item { delete(id:$id) } }`;
+// 2) delete each ID
+const DEL = `mutation ($id:ID!){ item{ delete(id:$id) } }`;
 
-for (const child of children) {
-  await pim(DEL, { id: child.id });
-  console.log(`🗑️  deleted ${child.name} (${child.shapeIdentifier})`);
+for (const { node:{ id, path } } of edges) {
+  await pim(DEL, { id });
+  console.log('🗑️  deleted', path);
 }
 
-console.log('\n✅ All children of /products removed.');
+console.log('\n✅ Purged everything directly under /products');
