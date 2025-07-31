@@ -1,58 +1,63 @@
-/* --- imports ----------------------------------------------------------- */
-import utils from '@crystallize/import-utilities';   // CJS → 1 default export
-const { Bootstrapper } = utils;                      // pull what we need
+/* ─── imports ─────────────────────────────────────────────────────────── */
+import utils from '@crystallize/import-utilities';          // CJS → default export
+const { Bootstrapper } = utils;
 
-/* --- auth & tenant ----------------------------------------------------- */
-const tenantIdentifier = 'your-tenant-slug';         // the URL slug, not the UUID
-const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
-const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
+/* ─── auth & tenant ───────────────────────────────────────────────────── */
+const tenantIdentifier = 'starter-kit';                     // your slug
+const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;       // repo secret
+const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;   // repo secret
 
-/* --- fetch the dummy data --------------------------------------------- */
+/* ─── tiny helper to make URL-safe paths ──────────────────────────────── */
+const slug = (s) =>
+  s.toLowerCase()
+   .replace(/[^a-z0-9]+/g, '-')   // spaces & punctuation → dash
+   .replace(/(^-|-$)/g, '');      // trim leading / trailing dash
+
+/* ─── fetch 100 dummyjson products ────────────────────────────────────── */
 const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* --- build a minimal spec --------------------------------------------- */
+/* ─── build the spec: ONLY items, shape already exists ────────────────── */
 const spec = {
-  shapes: [{
-    name: 'Product',
-    identifier: 'product',
-    type: 'product',
-    components: [
-      { id: 'description', name: 'Description', type: 'richText' },
-      { id: 'brand',       name: 'Brand',        type: 'singleLine' },
-      { id: 'category',    name: 'Category',     type: 'singleLine' },
-      { id: 'images',      name: 'Images',       type: 'images' }
-    ]
-  }],
-  items: products.map(p => ({
+  items: products.map((p) => ({
     name: p.title,
-    shape: 'product',
+    shape: 'beta-storefront',
     vatType: 'No Tax',
+
+    /* put it in /products/<slug> */
+    tree: { path: `/products/${slug(p.title)}` },
+
+    /* shape components */
     components: {
-      description: { json: [{ type:'paragraph', children:[{ text:p.description }]}] },
-      brand:  p.brand,
-      category: p.category,
-      images:  p.images.map(src => ({ src }))
+      title:        p.title,
+      description:  { json: [
+        { kind: 'block', type: 'paragraph', textContent: p.description }
+      ]},
+      brand:        p.brand,
+      thumbnail:    [{ src: p.thumbnail }],
     },
+
+    /* one variant that satisfies the variant-components of the shape */
     variants: [{
-      name: p.title,
-      sku:  `dummy-${p.id}`,
-      isDefault: true,
-      price: { eur: p.price },
-      stock: p.stock,
-      images: p.images.map(src => ({ src }))
-    }]
-  }))
+      name:       p.title,
+      sku:        `dummy-${p.id}`,
+      isDefault:  true,
+      price:      { default: p.price },   // “default” price-variant = NOK
+      stock:      p.stock,
+      images:     p.images.map((src) => ({ src })),
+      attributes: {},                     // empty → still fulfils the field
+    }],
+  })),
 };
 
-/* --- bootstrap the tenant --------------------------------------------- */
+/* ─── bootstrap the tenant ────────────────────────────────────────────── */
 const bootstrapper = new Bootstrapper();
 bootstrapper.setAccessToken(tokenId, tokenSecret);
 bootstrapper.setTenantIdentifier(tenantIdentifier);
 bootstrapper.setSpec(spec);
 
-await bootstrapper.start();   // performs the import
-await bootstrapper.kill();    // closes open handles (important in long-running procs)
+await bootstrapper.start();   // runs all mutations
+await bootstrapper.kill();    // close handles
 
-console.log('✅ Imported', products.length, 'products');
+console.log(`✅ Imported ${products.length} products into /products`);
