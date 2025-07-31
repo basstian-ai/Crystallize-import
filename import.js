@@ -3,28 +3,30 @@ import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
 /* ───────── tenant auth ──────────────────────────────────────────────── */
-const tenantIdentifier = 'starter-kit';          //  ← your tenant slug
+const tenantIdentifier = 'starter-kit';              //  ← your tenant slug
 const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* ───────── helper: URL-safe slugs ───────────────────────────────────── */
+/* ───────── helper: slugify for paths ────────────────────────────────── */
 const slug = (s) =>
   s.toLowerCase().trim()
    .replace(/[^a-z0-9]+/g, '-')
    .replace(/(^-|-$)/g, '');
 
-/* ───────── fetch dummyjson data ─────────────────────────────────────── */
+/* ───────── fetch the 100 dummyjson products again ───────────────────── */
 const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* ───────── PASS A – attach externalReference in place ───────────────── */
+/* ───────── PASS A – tag existing root-level items ─────────────────────
+   Matches by current path (/products/<slug>) *and* correct shape
+   (beta-storefront) so Bootstrapper can update in-place.                */
 const patchSpec = {
   items: products.map((p) => ({
     name: p.title,
-    shape: 'product',                           // ← matches the old items
-    tree: { path: `/products/${slug(p.title)}` },
-    externalReference: `dummyjson-${p.id}`,
+    shape: 'beta-storefront',                      // ← match existing shape
+    tree: { path: `/products/${slug(p.title)}` },  // ← match existing path
+    externalReference: `dummyjson-${p.id}`,        // ← NEW idempotent key
     published: true,
   })),
 };
@@ -34,15 +36,15 @@ patch.setAccessToken(tokenId, tokenSecret);
 patch.setTenantIdentifier(tenantIdentifier);
 patch.setSpec(patchSpec);
 
-console.log('▶️  Pass A: tagging existing root-level products…');
+console.log('▶️  Pass A: adding externalReference to root-level items…');
 await patch.start();
 await patch.kill();
-console.log('✅ Pass A done – externalReference added\n');
+console.log('✅ Pass A done – every item now has externalReference\n');
 
-/* ───────── get the category list for pass B ─────────────────────────── */
+/* ───────── derive unique category list for Pass B ───────────────────── */
 const categories = [...new Set(products.map((p) => p.category))];
 
-/* ───────── PASS B – create folders & move products ──────────────────── */
+/* ───────── PASS B – create folders, move & publish products ─────────── */
 const moveSpec = {
   items: [
     /* 1️⃣  category folders (shape = "category") */
@@ -55,19 +57,39 @@ const moveSpec = {
       externalReference: `cat-${slug(c)}`,
     })),
 
-    /* 2️⃣  products now placed under their category folder */
+    /* 2️⃣  products moved under their category folder */
     ...products.map((p) => {
       const cat  = slug(p.category);
       const prod = slug(p.title);
 
       return {
         name: p.title,
-        shape: 'product',                        // keep original shape
+        shape: 'beta-storefront',                  // keep original shape
         tree: { path: `/products/${cat}/${prod}` },
         vatType: 'No Tax',
         published: true,
 
-        externalReference: `dummyjson-${p.id}`,  // matches Pass A key
+        externalReference: `dummyjson-${p.id}`,    // matches Pass A key
+
+        /* optional: refresh main fields while we’re at it */
+        components: {
+          title:       p.title,
+          description: { json: [
+            { kind: 'block', type: 'paragraph', textContent: p.description }
+          ]},
+          brand:       p.brand,
+          thumbnail:   [{ src: p.thumbnail }],
+        },
+
+        variants: [{
+          name:       p.title,
+          sku:        `dummy-${p.id}`,
+          isDefault:  true,
+          price:      { default: p.price },        // NOK “default” price-variant
+          stock:      p.stock,
+          images:     p.images.map((src) => ({ src })),
+          attributes: {},
+        }],
       };
     }),
   ],
@@ -84,5 +106,5 @@ await move.kill();
 
 console.log(
   `🎉 All done – ${categories.length} categories created and ` +
-  `${products.length} products moved & published under /products/<category>/<product>`
+  `${products.length} products moved + published under /products/<category>/<product>`
 );
