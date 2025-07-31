@@ -1,13 +1,12 @@
-console.log('DEBUG endpoint:',
-  `https://api.crystallize.com/${TENANT}/pim`);
-console.log('DEBUG tokenId present?', Boolean(TOKEN_ID));
-console.log('DEBUG tokenSecret present?', Boolean(TOKEN_SECRET));
-process.exit();
-
 /* ───────── tenant settings ────────────────────────────────────────── */
-const TENANT       = 'starter-kit';                 //  ← your slug
+const TENANT       = 'starter-kit';          //  <- exact slug after the @ in the UI
 const TOKEN_ID     = process.env.CRYSTALLIZE_TOKEN_ID;
 const TOKEN_SECRET = process.env.CRYSTALLIZE_TOKEN_SECRET;
+
+/*  optional one-time sanity check  */
+console.log('DEBUG endpoint :', `https://api.crystallize.com/${TENANT}/pim`);
+console.log('DEBUG token id :', Boolean(TOKEN_ID));
+console.log('DEBUG token sec:', Boolean(TOKEN_SECRET));
 
 /* ───────── helper: call PIM GraphQL (v2023-10) ────────────────────── */
 async function pimFetch(query, variables = {}) {
