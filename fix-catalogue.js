@@ -1,114 +1,94 @@
-/* ───────── tenant settings ────────────────────────────────────────── */
-const TENANT       = 'starter-kit';          //  <- exact slug after the @ in the UI
+/* ─── tenant secrets ───────────────────────────────────────────── */
 const TOKEN_ID     = process.env.CRYSTALLIZE_TOKEN_ID;
 const TOKEN_SECRET = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/*  optional one-time sanity check  */
-console.log('DEBUG endpoint :', `https://api.crystallize.com/${TENANT}/pim`);
-console.log('DEBUG token id :', Boolean(TOKEN_ID));
-console.log('DEBUG token sec:', Boolean(TOKEN_SECRET));
+/* ─── tiny helper ───────────────────────────────────────────────── */
+const slug = s =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-/* ───────── helper: call PIM GraphQL (v2023-10) ────────────────────── */
-async function pimFetch(query, variables = {}) {
-  const res = await fetch(
-    `https://api.crystallize.com/${TENANT}/pim`,
-    {
-      method : 'POST',
-      headers: {
-        'Content-Type'                       : 'application/json',
-        'X-Crystallize-Access-Token-Id'      : TOKEN_ID,
-        'X-Crystallize-Access-Token-Secret'  : TOKEN_SECRET,
-      },
-      body: JSON.stringify({ query, variables }),
-    }
-  );
+/* ─── low-level fetch wrapper for the PIM API ───────────────────── */
+async function pim(query, variables = {}) {
+  const res = await fetch('https://pim.crystallize.com/graphql', {
+    method : 'POST',
+    headers: {
+      'Content-Type'                      : 'application/json',
+      'X-Crystallize-Access-Token-Id'     : TOKEN_ID,
+      'X-Crystallize-Access-Token-Secret' : TOKEN_SECRET,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); }
   catch { throw new Error(`HTTP ${res.status} – ${text}`); }
 
-  if (json.errors) {
-    throw new Error(JSON.stringify(json.errors, null, 2));
-  }
+  if (json.errors) throw new Error(JSON.stringify(json.errors, null, 2));
   return json.data;
 }
 
-/* ───────── utils ──────────────────────────────────────────────────── */
-const slug = (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+/* ─── preload dummyjson data ────────────────────────────────────── */
+const { products } = await (await fetch(
+  'https://dummyjson.com/products?limit=100'
+)).json();
 
-/* ───────── 100 dummy products ─────────────────────────────────────── */
-const { products } = await (await fetch('https://dummyjson.com/products?limit=100')).json();
+/* GraphQL snippets ------------------------------------------------ */
+const GQ_LOOKUP = `query($path:String!){ catalogue(path:$path,language:"en"){id externalReference} }`;
+const GQ_UPDATE = `mutation($id:ID!,$ref:String!){ itemUpdate(id:$id,input:{externalReference:$ref}){id} }`;
+const GQ_MOVE   = `mutation($id:ID!,$parent:ID!,$name:String!){ itemMove(id:$id,parentId:$parent,language:"en",name:$name){id} }`;
+const GQ_FOLDER = `mutation($name:String!,$parent:ID!){ folderCreate(
+  input:{ name:$name, shape:"category", parentId:$parent }, language:"en"){id} }`;
 
-/* ───────── GraphQL snippets ───────────────────────────────────────── */
-const GQL_LOOKUP = `query($path:String!){ catalogue(path:$path,language:"en"){id externalReference} }`;
-
-const GQL_UPDATE_REF = `
-mutation($id:ID!,$ref:String!){
-  itemUpdate(id:$id,input:{externalReference:$ref}){id}
-}`;
-
-const GQL_MOVE = `
-mutation($id:ID!,$parent:ID!,$name:String!){
-  itemMove(id:$id,parentId:$parent,language:"en",name:$name){id}
-}`;
-
-const GQL_FOLDER_CREATE = `
-mutation($input:FolderCreateInput!){
-  folderCreate(input:$input,language:"en"){ id }
-}`;
-
-/* ───────── ensure /products folder ID ─────────────────────────────── */
-const { catalogue: prodRoot } = await pimFetch(GQL_LOOKUP, { path: '/products' });
-if (!prodRoot) throw new Error("Can't find /products folder in tenant");
+/* ─── get the ID of the /products root folder ───────────────────── */
+const { catalogue: prodRoot } = await pim(GQ_LOOKUP, { path: '/products' });
+if (!prodRoot) throw new Error("Can't find a /products folder in the tenant");
 const PRODUCTS_FOLDER_ID = prodRoot.id;
 
-/* ───────── main loop ──────────────────────────────────────────────── */
-const madeFolder = new Set();
+/* ─── main loop --------------------------------------------------- */
+const foldersDone = new Map();                         // categorySlug ➜ folderId
 
 for (const p of products) {
-  const productSlug  = slug(p.title);
-  const categorySlug = slug(p.category);
+  const prodSlug = slug(p.title);
+  const catSlug  = slug(p.category);
 
-  /* 1️⃣   locate current item (root-level) */
-  const currentPath = `/products/${productSlug}`;
-  const { catalogue: item } = await pimFetch(GQL_LOOKUP, { path: currentPath });
+  /* 1️⃣ locate the existing root-level item */
+  const { catalogue: item } =
+    await pim(GQ_LOOKUP, { path: `/products/${prodSlug}` });
   if (!item) {
-    console.warn(`Skip – no item at ${currentPath}`);
+    console.warn(`⚠️  Missing product at /products/${prodSlug} – skipped`);
     continue;
   }
 
-  /* 2️⃣   add externalReference if missing */
-  const extRef = `dummyjson-${p.id}`;
+  /* 2️⃣ set externalReference if not present */
+  const ref = `dummyjson-${p.id}`;
   if (!item.externalReference) {
-    await pimFetch(GQL_UPDATE_REF, { id: item.id, ref: extRef });
-    console.log(`✓ set externalReference for ${currentPath}`);
+    await pim(GQ_UPDATE, { id: item.id, ref });
+    console.log(`✓ set externalReference for ${prodSlug}`);
   }
 
-  /* 3️⃣   ensure category folder exists (once per category) */
-  const catPath = `/products/${categorySlug}`;
-  if (!madeFolder.has(categorySlug)) {
-    madeFolder.add(categorySlug);
-    const { catalogue: cat } = await pimFetch(GQL_LOOKUP, { path: catPath });
-    if (!cat) {
-      const { folderCreate } = await pimFetch(GQL_FOLDER_CREATE, {
-        input: {
-          name   : p.category,
-          shape  : 'category',
-          parentId: PRODUCTS_FOLDER_ID,
-        },
-      });
+  /* 3️⃣ ensure the category folder exists (once per category) */
+  let catId = foldersDone.get(catSlug);
+  if (!catId) {
+    const catPath = `/products/${catSlug}`;
+    const { catalogue: cat } = await pim(GQ_LOOKUP, { path: catPath });
+
+    if (cat) catId = cat.id;
+    else {
+      const { folderCreate } =
+        await pim(GQ_FOLDER, { name: p.category, parent: PRODUCTS_FOLDER_ID });
+      catId = folderCreate.id;
       console.log(`+ created folder ${catPath}`);
     }
+    foldersDone.set(catSlug, catId);
   }
 
-  /* 4️⃣   move item under the category folder */
-  const { catalogue: catFolder } = await pimFetch(GQL_LOOKUP, { path: catPath });
-  await pimFetch(GQL_MOVE, {
+  /* 4️⃣ move + publish the product */
+  await pim(GQ_MOVE, {
     id    : item.id,
-    parent: catFolder.id,
+    parent: catId,
     name  : p.title,
   });
-  console.log(`→ moved  ${productSlug}  →  ${catPath}/${productSlug}`);
+  console.log(`→ moved  ${prodSlug}  →  /products/${catSlug}/${prodSlug}`);
 }
 
-console.log('\n🎉 100 products now carry externalReference and sit in their category folders.');
+console.log('\n🎉  All products now carry externalReference and sit in their category folders.');
