@@ -1,3 +1,9 @@
+console.log('DEBUG endpoint:',
+  `https://api.crystallize.com/${TENANT}/pim`);
+console.log('DEBUG tokenId present?', Boolean(TOKEN_ID));
+console.log('DEBUG tokenSecret present?', Boolean(TOKEN_SECRET));
+process.exit();
+
 /* ───────── tenant settings ────────────────────────────────────────── */
 const TENANT       = 'starter-kit';                 //  ← your slug
 const TOKEN_ID     = process.env.CRYSTALLIZE_TOKEN_ID;
