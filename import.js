@@ -1,41 +1,62 @@
 /* ───────── imports ──────────────────────────────────────────────────── */
-import utils from '@crystallize/import-utilities';          // CommonJS package → default export
+import utils from '@crystallize/import-utilities';          // CommonJS → default
 const { Bootstrapper } = utils;
 
 /* ───────── tenant auth ──────────────────────────────────────────────── */
-const tenantIdentifier = 'starter-kit';   //  <<— replace with your tenant slug
+const tenantIdentifier = 'starter-kit';          // ← your tenant slug
 const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* ───────── helper: make URL-safe slugs ──────────────────────────────── */
+/* ───────── helper: URL-safe slug ─────────────────────────────────────── */
 const slug = (s) =>
-  s.toLowerCase()
-   .trim()
+  s.toLowerCase().trim()
    .replace(/[^a-z0-9]+/g, '-')
    .replace(/(^-|-$)/g, '');
 
-/* ───────── fetch the 100 dummyjson products ─────────────────────────── */
+/* ───────── fetch the dummyjson payload ──────────────────────────────── */
 const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* ───────── derive unique category list ──────────────────────────────── */
+/* ───────── PASS A — add externalReference in-place ──────────────────── */
+const patchSpec = {
+  /* no shapes, no categories — just touch the 100 products where they are */
+  items: products.map((p) => ({
+    name: p.title,
+    shape: 'beta-storefront',
+    tree: { path: `/products/${slug(p.title)}` },   // current location
+    externalReference: `dummyjson-${p.id}`,         // NEW key
+    published: true,                                // keep published
+  })),
+};
+
+const patchBootstrapper = new Bootstrapper();
+patchBootstrapper.setAccessToken(tokenId, tokenSecret);
+patchBootstrapper.setTenantIdentifier(tenantIdentifier);
+patchBootstrapper.setSpec(patchSpec);
+
+console.log('▶️  Pass A: adding externalReference to existing items…');
+await patchBootstrapper.start();
+await patchBootstrapper.kill();
+console.log('✅ Pass A done\n');
+
+/* ───────── derive category list for pass B ──────────────────────────── */
 const categories = [...new Set(products.map((p) => p.category))];
 
-/* ───────── build the spec object ────────────────────────────────────── */
-const spec = {
+/* ───────── PASS B — create/move & publish ───────────────────────────── */
+const moveSpec = {
   items: [
-    /* 1️⃣  Category folders (shape = "category") */
+    /* 1️⃣  category folders */
     ...categories.map((c) => ({
       name: c,
       shape: 'category',
       tree: { path: `/products/${slug(c)}` },
       vatType: 'No Tax',
       published: true,
-      externalReference: `cat-${slug(c)}`,   // key for idempotent updates
+      externalReference: `cat-${slug(c)}`,
     })),
 
-    /* 2️⃣  Products placed in their category folder */
+    /* 2️⃣  products now placed in the category folder */
     ...products.map((p) => {
       const cat  = slug(p.category);
       const prod = slug(p.title);
@@ -47,7 +68,7 @@ const spec = {
         vatType: 'No Tax',
         published: true,
 
-        externalReference: `dummyjson-${p.id}`,
+        externalReference: `dummyjson-${p.id}`,      // matches Pass A key
 
         components: {
           title:       p.title,
@@ -62,7 +83,7 @@ const spec = {
           name:       p.title,
           sku:        `dummy-${p.id}`,
           isDefault:  true,
-          price:      { default: p.price },   // your tenant’s only price variant (NOK)
+          price:      { default: p.price },          // NOK “default” price-variant
           stock:      p.stock,
           images:     p.images.map((src) => ({ src })),
           attributes: {},
@@ -72,16 +93,12 @@ const spec = {
   ],
 };
 
-/* ───────── bootstrap the tenant ─────────────────────────────────────── */
-const bootstrapper = new Bootstrapper();
-bootstrapper.setAccessToken(tokenId, tokenSecret);
-bootstrapper.setTenantIdentifier(tenantIdentifier);
-bootstrapper.setSpec(spec);
+const moveBootstrapper = new Bootstrapper();
+moveBootstrapper.setAccessToken(tokenId, tokenSecret);
+moveBootstrapper.setTenantIdentifier(tenantIdentifier);
+moveBootstrapper.setSpec(moveSpec);
 
-/* NOTE: no setOptions() required in current import-utilities */
-await bootstrapper.start();   // performs create / update / move / publish
-await bootstrapper.kill();    // close open handles (good practice)
-
-console.log(
-  `✅ Categories: ${categories.length}, Products: ${products.length} — all synced & published`
-);
+console.log('▶️  Pass B: creating categories and moving products…');
+await moveBootstrapper.start();
+await moveBootstrapper.kill();
+console.log(`🎉 All done: ${categories.length} categories + ${products.length} products now live under /products/<category>/<product>\n`);
