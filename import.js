@@ -1,52 +1,51 @@
 /* ───────── imports ──────────────────────────────────────────────────── */
-import utils from '@crystallize/import-utilities';          // CommonJS → default
+import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
 /* ───────── tenant auth ──────────────────────────────────────────────── */
-const tenantIdentifier = 'starter-kit';          // ← your tenant slug
+const tenantIdentifier = 'starter-kit';          //  ← your tenant slug
 const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* ───────── helper: URL-safe slug ─────────────────────────────────────── */
+/* ───────── helper: URL-safe slugs ───────────────────────────────────── */
 const slug = (s) =>
   s.toLowerCase().trim()
    .replace(/[^a-z0-9]+/g, '-')
    .replace(/(^-|-$)/g, '');
 
-/* ───────── fetch the dummyjson payload ──────────────────────────────── */
+/* ───────── fetch dummyjson data ─────────────────────────────────────── */
 const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* ───────── PASS A — add externalReference in-place ──────────────────── */
+/* ───────── PASS A – attach externalReference in place ───────────────── */
 const patchSpec = {
-  /* no shapes, no categories — just touch the 100 products where they are */
   items: products.map((p) => ({
     name: p.title,
-    shape: 'beta-storefront',
-    tree: { path: `/products/${slug(p.title)}` },   // current location
-    externalReference: `dummyjson-${p.id}`,         // NEW key
-    published: true,                                // keep published
+    shape: 'product',                           // ← matches the old items
+    tree: { path: `/products/${slug(p.title)}` },
+    externalReference: `dummyjson-${p.id}`,
+    published: true,
   })),
 };
 
-const patchBootstrapper = new Bootstrapper();
-patchBootstrapper.setAccessToken(tokenId, tokenSecret);
-patchBootstrapper.setTenantIdentifier(tenantIdentifier);
-patchBootstrapper.setSpec(patchSpec);
+const patch = new Bootstrapper();
+patch.setAccessToken(tokenId, tokenSecret);
+patch.setTenantIdentifier(tenantIdentifier);
+patch.setSpec(patchSpec);
 
-console.log('▶️  Pass A: adding externalReference to existing items…');
-await patchBootstrapper.start();
-await patchBootstrapper.kill();
-console.log('✅ Pass A done\n');
+console.log('▶️  Pass A: tagging existing root-level products…');
+await patch.start();
+await patch.kill();
+console.log('✅ Pass A done – externalReference added\n');
 
-/* ───────── derive category list for pass B ──────────────────────────── */
+/* ───────── get the category list for pass B ─────────────────────────── */
 const categories = [...new Set(products.map((p) => p.category))];
 
-/* ───────── PASS B — create/move & publish ───────────────────────────── */
+/* ───────── PASS B – create folders & move products ──────────────────── */
 const moveSpec = {
   items: [
-    /* 1️⃣  category folders */
+    /* 1️⃣  category folders (shape = "category") */
     ...categories.map((c) => ({
       name: c,
       shape: 'category',
@@ -56,49 +55,34 @@ const moveSpec = {
       externalReference: `cat-${slug(c)}`,
     })),
 
-    /* 2️⃣  products now placed in the category folder */
+    /* 2️⃣  products now placed under their category folder */
     ...products.map((p) => {
       const cat  = slug(p.category);
       const prod = slug(p.title);
 
       return {
         name: p.title,
-        shape: 'beta-storefront',
+        shape: 'product',                        // keep original shape
         tree: { path: `/products/${cat}/${prod}` },
         vatType: 'No Tax',
         published: true,
 
-        externalReference: `dummyjson-${p.id}`,      // matches Pass A key
-
-        components: {
-          title:       p.title,
-          description: { json: [
-            { kind: 'block', type: 'paragraph', textContent: p.description }
-          ]},
-          brand:       p.brand,
-          thumbnail:   [{ src: p.thumbnail }],
-        },
-
-        variants: [{
-          name:       p.title,
-          sku:        `dummy-${p.id}`,
-          isDefault:  true,
-          price:      { default: p.price },          // NOK “default” price-variant
-          stock:      p.stock,
-          images:     p.images.map((src) => ({ src })),
-          attributes: {},
-        }],
+        externalReference: `dummyjson-${p.id}`,  // matches Pass A key
       };
     }),
   ],
 };
 
-const moveBootstrapper = new Bootstrapper();
-moveBootstrapper.setAccessToken(tokenId, tokenSecret);
-moveBootstrapper.setTenantIdentifier(tenantIdentifier);
-moveBootstrapper.setSpec(moveSpec);
+const move = new Bootstrapper();
+move.setAccessToken(tokenId, tokenSecret);
+move.setTenantIdentifier(tenantIdentifier);
+move.setSpec(moveSpec);
 
 console.log('▶️  Pass B: creating categories and moving products…');
-await moveBootstrapper.start();
-await moveBootstrapper.kill();
-console.log(`🎉 All done: ${categories.length} categories + ${products.length} products now live under /products/<category>/<product>\n`);
+await move.start();
+await move.kill();
+
+console.log(
+  `🎉 All done – ${categories.length} categories created and ` +
+  `${products.length} products moved & published under /products/<category>/<product>`
+);
