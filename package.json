@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@crystallize/cli-next": "^4.19.0",
+    "@crystallize/import-utilities": "^1.33.0",
+    "node-fetch": "^3.3.2"
+  },
+  "type": "module"
+}
