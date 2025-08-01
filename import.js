@@ -108,3 +108,14 @@ console.log(
   `🎉 All done – ${categories.length} categories created and ` +
   `${products.length} products moved + published under /products/<category>/<product>`
 );
+/* … your existing code … */
+
+bs.setSpec(spec);
+
+console.log('▶ starting bootstrapper with', spec.items.length, 'items');
+
+await bs.start()
+        .then(() => console.log('✅ bootstrapper completed'))
+        .catch(err => console.error('❌ bootstrapper failed', err));
+
+await bs.kill();
