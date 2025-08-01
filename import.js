@@ -1,110 +1,94 @@
-/* ───────── imports ──────────────────────────────────────────────────── */
+/* ------------------------------------------------------------------ */
+/*  fresh one-pass import  –  100 products into their categories      */
+/* ------------------------------------------------------------------ */
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
-/* ───────── tenant auth ──────────────────────────────────────────────── */
-const tenantIdentifier = 'starter-kit';              //  ← your tenant slug
+/* ─── tenant creds ───────────────────────────────────────────────── */
+const tenantIdentifier = 'starter-kit';       //  change if needed
 const tokenId     = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* ───────── helper: slugify for paths ────────────────────────────────── */
-const slug = (s) =>
-  s.toLowerCase().trim()
-   .replace(/[^a-z0-9]+/g, '-')
-   .replace(/(^-|-$)/g, '');
+/* ─── helper: safe slug ------------------------------------------- */
+const slug = s => s.toLowerCase().trim()
+                   .replace(/[^a-z0-9]+/g, '-')
+                   .replace(/(^-|-$)/g, '');
 
-/* ───────── fetch the 100 dummyjson products again ───────────────────── */
-const { products } = await (await fetch(
-  'https://dummyjson.com/products?limit=100'
-)).json();
+/* ─── 1) try remote dummyjson, else local file -------------------- */
+let products;
+try {
+  const res = await (await fetch(
+    'https://dummyjson.com/products?limit=100'
+  )).json();
+  if (Array.isArray(res.products)) {
+    products = res.products;
+    console.log('📡  fetched 100 products from dummyjson.com');
+  }
+} catch { /* ignore network/json errors */ }
 
-/* ───────── PASS A – tag existing root-level items ─────────────────────
-   Matches by current path (/products/<slug>) *and* correct shape
-   (beta-storefront) so Bootstrapper can update in-place.                */
-const patchSpec = {
-  items: products.map((p) => ({
-    name: p.title,
-    shape: 'beta-storefront',                      // ← match existing shape
-    tree: { path: `/products/${slug(p.title)}` },  // ← match existing path
-    externalReference: `dummyjson-${p.id}`,        // ← NEW idempotent key
-    published: true,
-  })),
-};
+if (!products) {
+  console.log('⚠️  remote fetch failed – using local dummy-products.json');
+  const fs = await import('node:fs/promises');
+  products = JSON.parse(await fs.readFile('./dummy-products.json', 'utf8'));
+}
 
-const patch = new Bootstrapper();
-patch.setAccessToken(tokenId, tokenSecret);
-patch.setTenantIdentifier(tenantIdentifier);
-patch.setSpec(patchSpec);
+if (!Array.isArray(products) || !products.length) {
+  throw new Error('No products array available – aborting import.');
+}
 
-console.log('▶️  Pass A: adding externalReference to root-level items…');
-await patch.start();
-await patch.kill();
-console.log('✅ Pass A done – every item now has externalReference\n');
+/* ─── 2) derive unique category list ------------------------------ */
+const categories = [...new Set(products.map(p => p.category))];
 
-/* ───────── derive unique category list for Pass B ───────────────────── */
-const categories = [...new Set(products.map((p) => p.category))];
-
-/* ───────── PASS B – create folders, move & publish products ─────────── */
-const moveSpec = {
+/* ─── 3) build minimal spec -------------------------------------- */
+const spec = {
   items: [
-    /* 1️⃣  category folders (shape = "category") */
-    ...categories.map((c) => ({
-      name: c,
-      shape: 'category',
-      tree: { path: `/products/${slug(c)}` },
-      vatType: 'No Tax',
+    /* folders */
+    ...categories.map(c => ({
+      name  : c,
+      shape : 'category',
+      tree  : { path: `/products/${slug(c)}` },
       published: true,
       externalReference: `cat-${slug(c)}`,
     })),
 
-    /* 2️⃣  products moved under their category folder */
-    ...products.map((p) => {
-      const cat  = slug(p.category);
-      const prod = slug(p.title);
+    /* products */
+    ...products.map(p => ({
+      name : p.title,
+      shape: 'beta-storefront',
+      tree : { path: `/products/${slug(p.category)}/${slug(p.title)}` },
+      vatType: 'No Tax',
+      published: true,
+      externalReference: `dummyjson-${p.id}`,
 
-      return {
-        name: p.title,
-        shape: 'beta-storefront',                  // keep original shape
-        tree: { path: `/products/${cat}/${prod}` },
-        vatType: 'No Tax',
-        published: true,
+      components: {
+        title      : p.title,
+        description: { json:[
+          { type:'paragraph', children:[{ text:p.description }]}
+        ]},
+        brand     : p.brand,
+        thumbnail : [{ src: p.thumbnail }],
+      },
 
-        externalReference: `dummyjson-${p.id}`,    // matches Pass A key
-
-        /* optional: refresh main fields while we’re at it */
-        components: {
-          title:       p.title,
-          description: { json: [
-            { kind: 'block', type: 'paragraph', textContent: p.description }
-          ]},
-          brand:       p.brand,
-          thumbnail:   [{ src: p.thumbnail }],
-        },
-
-        variants: [{
-          name:       p.title,
-          sku:        `dummy-${p.id}`,
-          isDefault:  true,
-          price:      { default: p.price },        // NOK “default” price-variant
-          stock:      p.stock,
-          images:     p.images.map((src) => ({ src })),
-          attributes: {},
-        }],
-      };
-    }),
+      variants: [{
+        name      : p.title,
+        sku       : `dummy-${p.id}`,
+        isDefault : true,
+        price     : { default: p.price },   // NOK price variant
+        stock     : p.stock,
+        images    : p.images.map(src=>({src})),
+        attributes: {},
+      }],
+    })),
   ],
 };
 
-const move = new Bootstrapper();
-move.setAccessToken(tokenId, tokenSecret);
-move.setTenantIdentifier(tenantIdentifier);
-move.setSpec(moveSpec);
+/* ─── 4) bootstrap in one pass ----------------------------------- */
+const bs = new Bootstrapper();
+bs.setAccessToken(tokenId, tokenSecret);
+bs.setTenantIdentifier(tenantIdentifier);
+bs.setSpec(spec);
 
-console.log('▶️  Pass B: creating categories and moving products…');
-await move.start();
-await move.kill();
-
-console.log(
-  `🎉 All done – ${categories.length} categories created and ` +
-  `${products.length} products moved + published under /products/<category>/<product>`
-);
+console.log(`▶ importing ${products.length} products into ${categories.length} categories…`);
+await bs.start();
+await bs.kill();
+console.log('🎉 import complete – catalogue ready');
