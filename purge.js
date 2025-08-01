@@ -1,63 +1,57 @@
-/***********************************************************************
- * purge.js – delete every child (folders + products) directly under   *
- *            /products.  Leaves the /products root folder intact.     *
- **********************************************************************/
+/*********************************************************************
+ * purge.js – delete all items that sit directly under ROOT_PATH     *
+ *             (keeps the folder itself).                            *
+ *********************************************************************/
+import fetch from 'node-fetch';      // Node <18; delete line if >=18
 
-// ─── tenant + auth ────────────────────────────────────────────────
-const TENANT        = 'starter-kit';                // ← your slug (after the @)
-const TOKEN_ID      = process.env.CRYSTALLIZE_TOKEN_ID;
-const TOKEN_SECRET  = process.env.CRYSTALLIZE_TOKEN_SECRET;
-const LANG          = 'en';
+const TENANT = 'starter-kit';        // <-- change if needed
+const TOKEN_ID = process.env.CRYSTALLIZE_TOKEN_ID;
+const TOKEN_SECRET = process.env.CRYSTALLIZE_TOKEN_SECRET;
+const LANG = 'en';
+const ROOT_PATH = '/';               // <- root of catalogue
 
-// ─── helper: call Catalogue API (read-only, no token) ─────────────
-async function cat(query, variables = {}) {
-  const r = await fetch(`https://api.crystallize.com/${TENANT}/catalogue`, {
-    method : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body   : JSON.stringify({ query, variables }),
-  });
-  const { data, errors } = await r.json();
-  if (errors) throw new Error(JSON.stringify(errors, null, 2));
-  return data;
-}
+/* ---- call Catalogue API (read-only) ------------------------------ */
+const cat = async (q,v={}) =>
+  (await (await fetch(
+    `https://api.crystallize.com/${TENANT}/catalogue`,
+    {method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({query:q,variables:v})}
+  )).json()).data;
 
-// ─── helper: call PIM API (for deletes) ───────────────────────────
-async function pim(query, variables = {}) {
-  const r = await fetch('https://pim.crystallize.com/graphql', {
-    method : 'POST',
-    headers: {
-      'Content-Type'                      : 'application/json',
-      'X-Crystallize-Access-Token-Id'     : TOKEN_ID,
-      'X-Crystallize-Access-Token-Secret' : TOKEN_SECRET,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const { data, errors } = await r.json();
-  if (errors) throw new Error(JSON.stringify(errors, null, 2));
-  return data;
-}
+/* ---- call PIM API (needs token) ---------------------------------- */
+const pim = async (q,v={}) =>
+  (await (await fetch(
+    'https://pim.crystallize.com/graphql',
+    {method:'POST',
+     headers:{
+       'Content-Type':'application/json',
+       'X-Crystallize-Access-Token-Id':TOKEN_ID,
+       'X-Crystallize-Access-Token-Secret':TOKEN_SECRET},
+     body:JSON.stringify({query:q,variables:v})}
+  )).json()).data;
 
-// ─── 1) list children of /products via Catalogue API ──────────────
+/* ---- 1) list direct children of ROOT_PATH ------------------------ */
 const CHILDREN_Q = `
-  query ($path:String!, $lang:String!) {
-    catalogue(path:$path, language:$lang) {
-      children { id path }
-    }
+  query($p:String!,$l:String!){
+    catalogue(path:$p,language:$l){ children{ id path } }
   }`;
+const res = await cat(CHILDREN_Q,{p:ROOT_PATH,l:LANG});
 
-const { catalogue } = await cat(CHILDREN_Q, { path:'/products', lang:LANG });
-
-if (!catalogue.children.length) {
-  console.log('Nothing to delete under /products.');
-  process.exit(0);
+if (!res.catalogue){
+  console.log(`No item at ${ROOT_PATH} – nothing to purge.`); process.exit(0);
+}
+if (!res.catalogue.children.length){
+  console.log('Nothing to delete.'); process.exit(0);
 }
 
-// ─── 2) delete each child by ID via PIM API ───────────────────────
-const DEL_MUT = `mutation ($id:ID!){ item{ delete(id:$id) } }`;
+/* ---- 2) delete each child id ------------------------------------- */
+const DEL = `mutation($id:ID!){ item{ delete(id:$id) } }`;
 
-for (const { id, path } of catalogue.children) {
-  await pim(DEL_MUT, { id });
+for (const {id,path} of res.catalogue.children){
+  // keep the products folder itself (optional)
+  if (path === '/products') continue;
+
+  await pim(DEL,{id});
   console.log('🗑️  deleted', path);
 }
-
-console.log('\n✅  Purged everything directly under /products');
+console.log('\n✅ Purged children of', ROOT_PATH);
