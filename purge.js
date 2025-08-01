@@ -18,22 +18,24 @@ const pim = async (query, variables={}) => {
   return data;
 };
 
-// 1) grab every direct child of /products (depth=1) using catalogue
+// 1) grab every direct child of /products (depth=1)
 const SEARCH = `
-  query ($path:String!, $lang:String!){
-    catalogue(path: $path, language: $lang) {
-      children { id path }
-    }
+  query ($path:String!,$lang:String!){
+    search(
+      filter:{ parent:{ eq:$path } },
+      language:$lang,
+      first:250
+    ){ edges{ node{ id path } } }
   }`;
 
-const { catalogue: { children } } = await pim(SEARCH, { path:'/products', lang:LANG });
+const { search:{ edges } } = await pim(SEARCH, { path:'/products', lang:LANG });
 
-if (!children.length) { console.log('Nothing to delete.'); process.exit(0); }
+if (!edges.length) { console.log('Nothing to delete.'); process.exit(0); }
 
-// 2) delete by id (mutation remains the same)
-const DEL = `mutation ($id:ID!){ item { delete(id: $id) } }`;
+// 2) delete by id
+const DEL = `mutation ($id:ID!){ item{ delete(id:$id) } }`;
 
-for (const { id, path } of children) {
+for (const { node:{ id, path } } of edges) {
   await pim(DEL, { id });
   console.log('🗑️ deleted', path);
 }
