@@ -1,79 +1,80 @@
-/* fresh import – /products → categories → 100 products --------------- */
+/* one-shot import — /products → categories → 100 products ------------- */
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
-/* tenant creds ------------------------------------------------------ */
-const tenantIdentifier = 'starter-kit';          // change if needed
+/* tenant creds ------------------------------------------------------- */
+const tenantIdentifier = 'starter-kit';           // change if needed
 const tokenId          = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret      = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
-/* helper ------------------------------------------------------------ */
+/* helpers ------------------------------------------------------------ */
 const slug = s => s.toLowerCase().trim()
                    .replace(/[^a-z0-9]+/g, '-')
                    .replace(/(^-|-$)/g, '');
 
-/* 1️⃣  get the dummy data (remote → local fallback) ----------------- */
+/* 1️⃣  get the 100 products (remote → local fallback) ---------------- */
 let products;
 try {
   const { products: p } =
     await (await fetch('https://dummyjson.com/products?limit=100')).json();
   products = p;
   console.log('📡  fetched 100 products from dummyjson.com');
-} catch { /* ignore */ }
+} catch { /* ignore network errors */ }
 
 if (!products) {
   console.log('⚠️  remote fetch failed – using local dummy-products.json');
   const fs = await import('node:fs/promises');
   products = JSON.parse(await fs.readFile('./dummy-products.json', 'utf8'));
 }
-
 if (!Array.isArray(products) || !products.length) {
-  throw new Error('❌ no products – aborting import');
+  throw new Error('❌ no products array – aborting import');
 }
 
 const categories = [...new Set(products.map(p => p.category))];
 
-/* 2️⃣  build spec --------------------------------------------------- */
-const items = [];
+/* 2️⃣  build spec ---------------------------------------------------- */
+const spec = { items: [] };
 
-/* /products root folder (only once) */
-items.push({
+/*  root folder /products  */
+spec.items.push({
   name : 'Products',
-  shape: 'folder',                     // use a simple folder shape
+  shape: 'folder',                      // simple folder shape
   tree : { path: '/products' },
   published: true,
-  externalReference: 'root-products',
 });
 
-/* category folders */
+/*  category folders (path-based)  */
 for (const c of categories) {
-  items.push({
+  spec.items.push({
     name : c,
     shape: 'category',
-    tree : { parentId: 'root-products', name: slug(c) },
+    tree : { path: `/products/${slug(c)}` },
     published: true,
     externalReference: `cat-${slug(c)}`,
   });
 }
 
-/* products */
+/*  products (path-based)  */
 for (const p of products) {
-  items.push({
+  const catSlug  = slug(p.category);
+  const prodSlug = slug(p.title);
+
+  spec.items.push({
     name : p.title,
     shape: 'beta-storefront',
-    tree : {
-      parentId: `cat-${slug(p.category)}`,
-      name    : slug(p.title),
-    },
-    vatType   : 'No Tax',
-    published : true,
+    tree : { path: `/products/${catSlug}/${prodSlug}` },
+    vatType: 'No Tax',
+    published: true,
     externalReference: `dummyjson-${p.id}`,
 
     components: {
       title      : p.title,
       description: { json:[
-        { type:'paragraph',
-          children:[{ text: p.description }] }
+        {
+          kind       : 'block',
+          type       : 'paragraph',
+          textContent: p.description
+        }
       ]},
       brand     : p.brand,
       thumbnail : [{ src: p.thumbnail }],
@@ -83,19 +84,19 @@ for (const p of products) {
       name      : p.title,
       sku       : `dummy-${p.id}`,
       isDefault : true,
-      price     : { default: p.price },   // NOK default price-variant
+      price     : { default: p.price },   // “default” NOK price-variant
       stock     : p.stock,
-      images    : p.images.map(src=>({src})),
+      images    : p.images.map(src => ({ src })),
       attributes: {},
     }],
   });
 }
 
-/* 3️⃣  run bootstrapper -------------------------------------------- */
+/* 3️⃣  bootstrap ----------------------------------------------------- */
 const bs = new Bootstrapper();
 bs.setTenantIdentifier(tenantIdentifier);
 bs.setAccessToken(tokenId, tokenSecret);
-bs.setSpec({ items });
+bs.setSpec(spec);
 
 console.log(`▶ importing ${products.length} products into ${categories.length} categories…`);
 await bs.start();
