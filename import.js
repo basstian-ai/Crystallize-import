@@ -18,93 +18,65 @@ const { products } = await (await fetch(
   'https://dummyjson.com/products?limit=100'
 )).json();
 
-/* ───────── PASS A – tag existing root-level items ─────────────────────
-   Matches by current path (/products/<slug>) *and* correct shape
-   (beta-storefront) so Bootstrapper can update in-place.                */
-const patchSpec = {
-  items: products.map((p) => ({
-    name: p.title,
-    shape: 'beta-storefront',                      // ← match existing shape
-    tree: { path: `/products/${slug(p.title)}` },  // ← match existing path
-    externalReference: `dummyjson-${p.id}`,        // ← NEW idempotent key
-    published: true,
-  })),
-};
-
-const patch = new Bootstrapper();
-patch.setAccessToken(tokenId, tokenSecret);
-patch.setTenantIdentifier(tenantIdentifier);
-patch.setSpec(patchSpec);
-
-console.log('▶️  Pass A: adding externalReference to root-level items…');
-await patch.start();
-await patch.kill();
-console.log('✅ Pass A done – every item now has externalReference\n');
-
-/* ───────── derive unique category list for Pass B ───────────────────── */
+/* ───────── derive unique category list ──────────────────────────────── */
 const categories = [...new Set(products.map((p) => p.category))];
+const items = [];
 
-/* ───────── PASS B – create folders, move & publish products ─────────── */
-const moveSpec = {
-  items: [
-    /* 1️⃣  category folders (shape = "category") */
-    ...categories.map((c) => ({
-      name: c,
-      shape: 'category',
-      tree: { path: `/products/${slug(c)}` },
-      vatType: 'No Tax',
-      published: true,
-      externalReference: `cat-${slug(c)}`,
-    })),
+/* 0️⃣ root /products folder */
+items.push({
+  name : 'Products',
+  shape: 'folder',
+  tree : { path: '/products' },
+  published: true,
+  externalReference: 'root-products-folder',
+});
 
-    /* 2️⃣  products moved under their category folder */
-    ...products.map((p) => {
-      const cat  = slug(p.category);
-      const prod = slug(p.title);
+/* 1️⃣ category folders */
+for (const c of categories){
+  items.push({
+    name : c,
+    shape: 'category',
+    tree : { parentId: 'root-products-folder', name: slug(c) },
+    published: true,
+    externalReference: `cat-${slug(c)}`,
+  });
+}
 
-      return {
-        name: p.title,
-        shape: 'beta-storefront',                  // keep original shape
-        tree: { path: `/products/${cat}/${prod}` },
-        vatType: 'No Tax',
-        published: true,
+/* 2️⃣ products */
+for (const p of products){
+  const catRef = `cat-${slug(p.category)}`;
+  items.push({
+    name : p.title,
+    shape: 'beta-storefront',
+    tree : { parentId: catRef, name: slug(p.title) },
+    vatType: 'No Tax',
+    published: true,
+    externalReference: `dummyjson-${p.id}`,
+    components: {
+      title:       p.title,
+      description: { json: [
+        { kind: 'block', type: 'paragraph', textContent: p.description }
+      ]},
+      brand:       p.brand,
+      thumbnail:   [{ src: p.thumbnail }],
+    },
+    variants: [{
+      name:       p.title,
+      sku:        `dummy-${p.id}`,
+      isDefault:  true,
+      price:      { default: p.price },
+      stock:      p.stock,
+      images:     p.images.map((src) => ({ src })),
+      attributes: {},
+    }],
+  });
+}
 
-        externalReference: `dummyjson-${p.id}`,    // matches Pass A key
+const bs = new Bootstrapper();
+bs.setAccessToken(tokenId, tokenSecret);
+bs.setTenantIdentifier(tenantIdentifier);
+bs.setSpec({ items });
 
-        /* optional: refresh main fields while we’re at it */
-        components: {
-          title:       p.title,
-          description: { json: [
-            { kind: 'block', type: 'paragraph', textContent: p.description }
-          ]},
-          brand:       p.brand,
-          thumbnail:   [{ src: p.thumbnail }],
-        },
-
-        variants: [{
-          name:       p.title,
-          sku:        `dummy-${p.id}`,
-          isDefault:  true,
-          price:      { default: p.price },        // NOK “default” price-variant
-          stock:      p.stock,
-          images:     p.images.map((src) => ({ src })),
-          attributes: {},
-        }],
-      };
-    }),
-  ],
-};
-
-const move = new Bootstrapper();
-move.setAccessToken(tokenId, tokenSecret);
-move.setTenantIdentifier(tenantIdentifier);
-move.setSpec(moveSpec);
-
-console.log('▶️  Pass B: creating categories and moving products…');
-await move.start();
-await move.kill();
-
-console.log(
-  `🎉 All done – ${categories.length} categories created and ` +
-  `${products.length} products moved + published under /products/<category>/<product>`
-);
+console.log(`▶ importing ${products.length} products into ${categories.length} categories…`);
+await bs.start();
+console.log('🎉 import complete – catalogue ready');
