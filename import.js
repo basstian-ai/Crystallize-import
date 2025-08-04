@@ -38,7 +38,7 @@ const spec = { items: [] };
 /*  root folder /products  */
 spec.items.push({
   name : 'Products',
-  shape: 'folder',                      // simple folder shape
+  shape: 'default-folder',                      // simple folder shape
   tree : { path: '/products' },
   published: true,
 });
