@@ -42,6 +42,34 @@ spec.items.push({
   tree : { path: '/products' },
   published: true,
 });
+//---------------------------------------------------------------
+// move-spec: relocate existing categories + products
+//---------------------------------------------------------------
+const moveItems = [];
+
+// categories → set parentId to root-products
+for (const c of categories) {
+  moveItems.push({
+    name : c,                     // optional
+    shape: 'category',
+    externalReference: `cat-${slug(c)}`,
+    tree : { parentId: 'root-products' },   // tell Bootstrapper to move
+    published: true,
+  });
+}
+
+// products → set parentId to the *category* reference
+for (const p of products) {
+  moveItems.push({
+    name : p.title,               // optional
+    shape: 'beta-storefront',
+    externalReference: `dummyjson-${p.id}`,
+    tree : { parentId: `cat-${slug(p.category)}` },
+    published: true,
+  });
+}
+
+spec.items.push(...moveItems);     // append to the spec you already built
 
 /*  category folders (path-based)  */
 for (const c of categories) {
