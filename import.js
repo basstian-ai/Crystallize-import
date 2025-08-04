@@ -1,13 +1,10 @@
-/*************************************************************************
- * Import 10 dummyjson products + Topic map “Categories”                *
- *************************************************************************/
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
 /* tenant ------------------------------------------------------------- */
 const tenantIdentifier = 'starter-kit';
-const tokenId          = process.env.CRYSTALLIZE_TOKEN_ID;
-const tokenSecret      = process.env.CRYSTALLIZE_TOKEN_SECRET;
+const tokenId = process.env.CRYSTALLIZE_TOKEN_ID;
+const tokenSecret = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
 /* helper ------------------------------------------------------------- */
 const slug = s =>
@@ -16,16 +13,21 @@ const slug = s =>
 /* 1) fetch products (remote → local) -------------------------------- */
 let products;
 try {
-  const { products: p } =
-    await (await fetch('https://dummyjson.com/products?limit=10')).json();
+  const { products: p } = await (await fetch('https://dummyjson.com/products?limit=10')).json();
   products = p;
   console.log('📡 fetched from dummyjson.com');
-} catch {}
+} catch (error) {
+  console.error('Fetch error:', error);
+}
 
 if (!products) {
-  console.log('⚠️  remote fetch failed – using local dummy-products.json');
-  const fs = await import('node:fs/promises');
-  products = JSON.parse(await fs.readFile('./dummy-products.json', 'utf8'));
+  console.log('⚠️ remote fetch failed – using local dummy-products.json');
+  try {
+    const fs = await import('node:fs/promises');
+    products = JSON.parse(await fs.readFile('./dummy-products.json', 'utf8'));
+  } catch (error) {
+    console.error('Local file read error:', error);
+  }
 }
 if (!Array.isArray(products) || !products.length) {
   throw new Error('no products – aborting');
@@ -33,70 +35,91 @@ if (!Array.isArray(products) || !products.length) {
 
 const categories = [...new Set(products.map(p => p.category))];
 
-/* 2) build spec ----------------------------------------------------- */
-const spec = {
+/* 2) build topic map spec ------------------------------------------- */
+const topicMapSpec = {
   topicMaps: [
     {
-      name          : { en: 'Categories' },
-      path          : { en: '/categories' },
+      name: { en: 'Categories' },
+      path: { en: '/categories' },
       pathIdentifier: { en: 'categories' },
-
-      /* valid topic objects – no externalReference */
       topics: categories.map(c => ({
-        name : { en: c },
-        path : { en: `/categories/${slug(c)}` },   // absolute
+        name: { en: c },
+        path: { en: `/${slug(c)}` }, // relative path
       })),
     },
   ],
+};
 
+/* 3) bootstrap topic map -------------------------------------------- */
+const bsTopicMap = new Bootstrapper();
+bsTopicMap.setTenantIdentifier(tenantIdentifier);
+bsTopicMap.setAccessToken(tokenId, tokenSecret);
+bsTopicMap.setSpec(topicMapSpec);
+
+console.log(`▶ importing topic map with ${categories.length} topics…`);
+try {
+  await bsTopicMap.start();
+  console.log('Topic map import completed');
+} catch (error) {
+  console.error('Topic map import failed:', error);
+}
+await bsTopicMap.kill();
+
+/* 4) build items spec ----------------------------------------------- */
+const itemsSpec = {
   items: [
     {
-      name : 'Products',
+      name: 'Products',
       shape: 'default-folder',
-      tree : { path: '/products' },
+      tree: { path: '/products' },
       published: true,
       externalReference: 'root-products',
     },
-
     ...products.map(p => ({
-      name : p.title,
+      name: p.title,
       shape: 'beta-storefront',
-      tree : { path: `/products/${slug(p.title)}` },
-      vatType  : 'No Tax',
+      tree: { path: `/products/${slug(p.title)}` },
+      vatType: 'No Tax',
       published: true,
       externalReference: `dummyjson-${p.id}`,
-
-      /* tag with the topic path */
       topics: [ `/categories/${slug(p.category)}` ],
-
       components: {
-        title      : p.title,
-        description: { json:[
-          { type:'paragraph', children:[{ text:p.description }] },
-        ]},
-        brand     : p.brand,
-        thumbnail : [{ src:p.thumbnail }],
+        title: p.title,
+        description: {
+          json: [
+            { type: 'paragraph', children: [{ text: p.description }] },
+          ],
+        },
+        brand: p.brand,
+        thumbnail: [{ src: p.thumbnail }],
       },
-
-      variants: [{
-        name      : p.title,
-        sku       : `dummy-${p.id}`,
-        isDefault : true,
-        price     : { default: p.price },
-        stock     : p.stock,
-        images    : p.images.map(src => ({ src })),
-      }],
+      variants: [
+        {
+          name: p.title,
+          sku: `dummy-${p.id}`,
+          isDefault: true,
+          price: { default: p.price },
+          stock: p.stock,
+          images: p.images.map(src => ({ src })),
+        },
+      ],
     })),
   ],
 };
 
-/* 3) bootstrap ------------------------------------------------------ */
-const bs = new Bootstrapper();
-bs.setTenantIdentifier(tenantIdentifier);
-bs.setAccessToken(tokenId, tokenSecret);
-bs.setSpec(spec);
+/* 5) bootstrap items ----------------------------------------------- */
+const bsItems = new Bootstrapper();
+bsItems.setTenantIdentifier(tenantIdentifier);
+bsItems.setAccessToken(tokenId, tokenSecret);
+bsItems.setSpec(itemsSpec);
 
-console.log(`▶ importing ${products.length} products into ${categories.length} topics…`);
-await bs.start();
-await bs.kill();
-console.log('🎉 import finished – products now tagged by topic');
+console.log(`▶ importing ${products.length} products…`);
+try {
+  await bsItems.start();
+  console.log('Items import completed');
+} catch (error) {
+  console.error('Items import failed:', error);
+}
+await bsItems.kill();
+
+console.log('🎉 import finished – products should be tagged by topic');
