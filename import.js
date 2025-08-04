@@ -1,5 +1,5 @@
 /*************************************************************************
- * Import 100 dummyjson products + Topic map “Categories”                *
+ * Import 10 dummyjson products + Topic map “Categories”                *
  *************************************************************************/
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
@@ -17,7 +17,7 @@ const slug = s =>
 let products;
 try {
   const { products: p } =
-    await (await fetch('https://dummyjson.com/products?limit=100')).json();
+    await (await fetch('https://dummyjson.com/products?limit=10')).json();
   products = p;
   console.log('📡 fetched from dummyjson.com');
 } catch {}
