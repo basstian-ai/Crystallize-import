@@ -1,30 +1,26 @@
 /*************************************************************************
- * Import 10 dummyjson products + Topic map “Categories”                *
- * - Topic map /categories with one topic per dummyjson category        *
- * - Folder /products; each product lives at /products/<slug>           *
- * - Each product tagged with its topic                                 *
- * Idempotent via externalReference.                                    *
+ * Import 100 dummyjson products + Topic map “Categories”                *
  *************************************************************************/
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
 /* tenant ------------------------------------------------------------- */
-const tenantIdentifier = 'starter-kit';            // change if needed
+const tenantIdentifier = 'starter-kit';
 const tokenId          = process.env.CRYSTALLIZE_TOKEN_ID;
 const tokenSecret      = process.env.CRYSTALLIZE_TOKEN_SECRET;
 
 /* helper ------------------------------------------------------------- */
-const slug = (s) =>
+const slug = s =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-/* 1) load products (remote → local fallback) ------------------------- */
+/* 1) fetch products (remote → local) -------------------------------- */
 let products;
 try {
   const { products: p } =
-    await (await fetch('https://dummyjson.com/products?limit=10')).json();
+    await (await fetch('https://dummyjson.com/products?limit=100')).json();
   products = p;
-  console.log('📡  fetched 10 products from dummyjson.com');
-} catch { /* ignore */ }
+  console.log('📡 fetched from dummyjson.com');
+} catch {}
 
 if (!products) {
   console.log('⚠️  remote fetch failed – using local dummy-products.json');
@@ -35,30 +31,25 @@ if (!Array.isArray(products) || !products.length) {
   throw new Error('no products – aborting');
 }
 
-const categories = [...new Set(products.map((p) => p.category))];
+const categories = [...new Set(products.map(p => p.category))];
 
-/* 2) build import spec ---------------------------------------------- */
+/* 2) build spec ----------------------------------------------------- */
 const spec = {
-  /* 2-A  topic map with embedded topics ---------------------------- */
   topicMaps: [
     {
       name          : { en: 'Categories' },
       path          : { en: '/categories' },
       pathIdentifier: { en: 'categories' },
 
-      /* child topics (absolute paths) */
-      topics: categories.map((c) => ({
-        name          : { en: c },
-        path          : { en: `/categories/${slug(c)}` },
-        pathIdentifier: { en: slug(c) },
-        externalReference: `cat-${slug(c)}`,
+      /* valid topic objects – no externalReference */
+      topics: categories.map(c => ({
+        name : { en: c },
+        path : { en: `/categories/${slug(c)}` },   // absolute
       })),
     },
   ],
 
-  /* 2-B  catalogue items ------------------------------------------ */
   items: [
-    /* root /products folder */
     {
       name : 'Products',
       shape: 'default-folder',
@@ -67,8 +58,7 @@ const spec = {
       externalReference: 'root-products',
     },
 
-    /* every product */
-    ...products.map((p) => ({
+    ...products.map(p => ({
       name : p.title,
       shape: 'beta-storefront',
       tree : { path: `/products/${slug(p.title)}` },
@@ -76,31 +66,26 @@ const spec = {
       published: true,
       externalReference: `dummyjson-${p.id}`,
 
-      /* tag with absolute topic path */
+      /* tag with the topic path */
       topics: [ `/categories/${slug(p.category)}` ],
 
       components: {
         title      : p.title,
         description: { json:[
-          {
-            type:'paragraph',
-            children:[{ text:p.description }],
-          },
+          { type:'paragraph', children:[{ text:p.description }] },
         ]},
         brand     : p.brand,
         thumbnail : [{ src:p.thumbnail }],
       },
 
-      variants: [
-        {
-          name      : p.title,
-          sku       : `dummy-${p.id}`,
-          isDefault : true,
-          price     : { default: p.price },
-          stock     : p.stock,
-          images    : p.images.map((src) => ({ src })),
-        },
-      ],
+      variants: [{
+        name      : p.title,
+        sku       : `dummy-${p.id}`,
+        isDefault : true,
+        price     : { default: p.price },
+        stock     : p.stock,
+        images    : p.images.map(src => ({ src })),
+      }],
     })),
   ],
 };
@@ -111,9 +96,7 @@ bs.setTenantIdentifier(tenantIdentifier);
 bs.setAccessToken(tokenId, tokenSecret);
 bs.setSpec(spec);
 
-console.log(
-  `▶ importing ${products.length} products + ${categories.length} topics…`,
-);
+console.log(`▶ importing ${products.length} products into ${categories.length} topics…`);
 await bs.start();
 await bs.kill();
-console.log('🎉 import finished – products tagged by topic');
+console.log('🎉 import finished – products now tagged by topic');
