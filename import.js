@@ -15,7 +15,7 @@ let products;
 try {
   const { products: p } = await (await fetch('https://dummyjson.com/products?limit=10')).json();
   products = p;
-  console.log('📡 fetched from dummyjson.com');
+  console.log('📡 fetched from dummyjson.com:', products.length, 'products');
 } catch (error) {
   console.error('Fetch error:', error);
 }
@@ -34,6 +34,7 @@ if (!Array.isArray(products) || !products.length) {
 }
 
 const categories = [...new Set(products.map(p => p.category))];
+console.log('Categories found:', categories);
 
 /* 2) build topic map spec ------------------------------------------- */
 const topicMapSpec = {
@@ -42,13 +43,22 @@ const topicMapSpec = {
       name: { en: 'Categories' },
       path: { en: '/categories' },
       pathIdentifier: { en: 'categories' },
-      topics: categories.map(c => ({
-        name: { en: c },
-        path: { en: `${slug(c)}` }, // Relative path, e.g., "electronics"
-      })),
+      topics: categories.map(c => {
+        if (!c) {
+          console.warn('Skipping empty category');
+          return null;
+        }
+        const topic = {
+          name: { en: c },
+          path: { en: `${slug(c)}` },
+        };
+        console.log('Creating topic:', topic);
+        return topic;
+      }).filter(t => t !== null),
     },
   ],
 };
+console.log('Topic map spec:', JSON.stringify(topicMapSpec, null, 2));
 
 /* 3) bootstrap topic map -------------------------------------------- */
 const bsTopicMap = new Bootstrapper();
@@ -82,7 +92,7 @@ const itemsSpec = {
       vatType: 'No Tax',
       published: true,
       externalReference: `dummyjson-${p.id}`,
-      topics: [ `/categories/${slug(p.category)}` ],
+      topics: [`/categories/${slug(p.category)}`],
       components: {
         title: p.title,
         description: {
