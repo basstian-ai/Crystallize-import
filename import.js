@@ -1,11 +1,3 @@
-/*************************************************************************
- *  Import 10 dummyjson products  +  Topic map “Categories”             *
- *  - creates /products folder                                           *
- *  - creates topic-map /categories                                      *
- *  - one topic for each dummyjson category                              *
- *  - tags every product with its topic                                  *
- *  Idempotent via externalReference.                                    *
- *************************************************************************/
 import utils from '@crystallize/import-utilities';
 const { Bootstrapper } = utils;
 
@@ -18,7 +10,7 @@ const tokenSecret      = process.env.CRYSTALLIZE_TOKEN_SECRET;
 const slug = (s) =>
   s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-/* 1) load products (remote->local fallback) -------------------------- */
+/* 1) load products (remote → local fallback) ------------------------- */
 let products;
 try {
   const { products: p } =
@@ -38,27 +30,28 @@ if (!Array.isArray(products) || !products.length) {
 
 const categories = [...new Set(products.map((p) => p.category))];
 
-/* 2) build spec ------------------------------------------------------- */
+/* 2) build import spec ---------------------------------------------- */
 const spec = {
-  /* 2-A topic map root ---------------------------------------------- */
+  /* 2-A  topic-map root ------------------------------------------- */
   topicMaps: [
     {
       name          : { en: 'Categories' },
-      path          : { en: '/categories' },      // map lives here
+      path          : { en: '/categories' },
       pathIdentifier: { en: 'categories' },
     },
   ],
 
-  /* 2-B individual topics (path is RELATIVE to the map) ------------- */
+  /* 2-B  individual topics (relative paths) ----------------------- */
   topics: categories.map((c) => ({
     name          : { en: c },
-    path          : { en: `/${slug(c)}` },        // ← relative
-    topicMapPath  : '/categories',                // link to map
+    path          : { en: `/${slug(c)}` },   // relative to the map
+    topicMapPath  : '/categories',
     externalReference: `cat-${slug(c)}`,
-  )),
+  })),
 
-  /* 2-C items (root folder + products) ------------------------------ */
+  /* 2-C  items ---------------------------------------------------- */
   items: [
+    /* root /products folder */
     {
       name : 'Products',
       shape: 'default-folder',
@@ -67,7 +60,7 @@ const spec = {
       externalReference: 'root-products',
     },
 
-    /* products */
+    /* every product */
     ...products.map((p) => ({
       name : p.title,
       shape: 'beta-storefront',
@@ -76,38 +69,43 @@ const spec = {
       published: true,
       externalReference: `dummyjson-${p.id}`,
 
-      /* tag with relative topic path */
-      topics: [ `/${slug(p.category)}` ],
+      /* tag with full topic path */
+      topics: [ `/categories/${slug(p.category)}` ],  // updated to full path
 
       components: {
         title      : p.title,
         description: { json:[
-          { type:'paragraph', children:[{ text:p.description }] }
+          {
+            type:'paragraph',
+            children:[{ text:p.description }],
+          },
         ]},
         brand     : p.brand,
         thumbnail : [{ src:p.thumbnail }],
       },
 
-      variants: [{
-        name      : p.title,
-        sku       : `dummy-${p.id}`,
-        isDefault : true,
-        price     : { default: p.price },
-        stock     : p.stock,
-        images    : p.images.map((src) => ({ src })),
-      }],
+      variants: [
+        {
+          name      : p.title,
+          sku       : `dummy-${p.id}`,
+          isDefault : true,
+          price     : { default: p.price },
+          stock     : p.stock,
+          images    : p.images.map((src) => ({ src })),
+        },
+      ],
     })),
   ],
 };
 
-/* 3) bootstrap ------------------------------------------------------- */
+/* 3) bootstrap ------------------------------------------------------ */
 const bs = new Bootstrapper();
 bs.setTenantIdentifier(tenantIdentifier);
 bs.setAccessToken(tokenId, tokenSecret);
 bs.setSpec(spec);
 
 console.log(
-  `▶ importing ${products.length} products & ${categories.length} topics…`
+  `▶ importing ${products.length} products + ${categories.length} topics…`,
 );
 await bs.start();
 await bs.kill();
