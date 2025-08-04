@@ -44,7 +44,7 @@ const topicMapSpec = {
       pathIdentifier: { en: 'categories' },
       topics: categories.map(c => ({
         name: { en: c },
-        path: { en: `/${slug(c)}` }, // relative path
+        path: { en: `${slug(c)}` }, // Relative path, e.g., "electronics"
       })),
     },
   ],
